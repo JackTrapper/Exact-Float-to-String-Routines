@@ -14,4 +14,13 @@ Its intended use is for trouble shooting problems with floating point numbers.
 
 This code uses dynamic arrays, overloaded calls, and optional parameters
 
+Sample Usage
+------------
+
+    ExactFloatToStr(0.28);
+
+Returns:
+
+    + 0.280,000,000,000,000,000,001,084,202,172,485,504,434,007,452,800,869,941,711,425,781,25
+
 Created by [John Herbster](https://cc.embarcadero.com/Item.aspx?id=19421)

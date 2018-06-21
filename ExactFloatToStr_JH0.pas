@@ -34,12 +34,12 @@ Unit ExactFloatToStr_JH0;
 
 Interface
 
-Function ExactFloatToStr(const Value: extended): AnsiString;
+Function ExactFloatToStr(const Value: Extended): AnsiString;
 { This call uses the global DecimalSeparator and ThousandSeparator.
   (It can be slow for very large or very small extended numbers.) }
 
 Function ExactFloatToStrEx(const Value: extended;
-                DecimalPoint: char = '.'; ThousandsSep: char = ' '): AnsiString;
+                DecimalPoint: Char = '.'; ThousandsSep: Char = ' '): AnsiString;
 { Use #0 for the ThousandsSep if *no* grouping breaks are desired. }
 
 Function ParseFloat(const Value: extended): AnsiString; overload;
@@ -117,150 +117,166 @@ Begin
     end;
 End;
 
-Function FloatingBinPointToDecStr
-    (const Value; const ValNbrBits, ValBinExp: integer; Negative: boolean;
-     DecimalPoint: char = '.'; ThousandsSep: char = ' '): AnsiString;
-
+Function FloatingBinPointToDecStr(const Value; const ValNbrBits, ValBinExp: Integer; Negative: Boolean;
+		DecimalPoint: Char='.'; ThousandsSep: Char=' '): AnsiString;
 { Value = Mantissa * 2^BinExp * 10^DecExp }
-Var Man: array of tSglWord; CryE: tSglWord; Cry: tDblWord;
-    NbrManElem,
-    BinExp{neg of # binary fraction bits},
-    DecExp{neg of # decimal fraction bits},
-    NbrDecFraDigits,
-    i, j, Tmp: integer; c: char;
-    Tmp1: packed record case byte of 0: (W: tDblWord); 1:(L,H: tSglWord); end;
+var
+	Man: array of tSglWord;
+	CryE: TSglWord;
+	Cry: TDblWord;
+	NbrManElem,
+	BinExp, //neg of # binary fraction bits
+	DecExp, //neg of # decimal fraction bits
+	NbrDecFraDigits,
+	i, j, Tmp: integer;
+	c: Char;
+	Tmp1: packed record case byte of 0: (W: tDblWord); 1:(L,H: tSglWord); end;
 Label Finish;
 
+{$IFDEF DEBUG}
+	procedure LogManExp(const Rem: string);
+	var
+		s: AnsiString; k: integer;
+	begin
+		LogFmt('%s: BinExp=%d, DecExp=%d, NbrManElem=%d', [Rem,BinExp,DecExp,NbrManElem]);
+		s := '';
+		for k := 0 to NbrManElem - 1 do
+			s := Format(' %2.2x',[Man[k]]) + s;
+		LogFmt('  %s',[s]);
+	end;
+{$ENDIF}
+
+begin
+	{ Load Mantissa and binary exponent: }
+	NbrManElem := (ValNbrBits + BitsInBufElem - 1) div BitsInBufElem;
+	SetLength(Man,NbrManElem);
+	Move(Value,Man[0],(ValNbrBits + 7) div 8); {Assuming little endian input}
+
+	{ Set exponents: (Value = Mantissa * 2^BinExp * 10^DecExp) }
+	BinExp := ValBinExp;
+	DecExp := 0;
+
+	{ Reduce mantissa to mininum number of bits (i.e. while mantissa is odd, div by 2 and inc binary exponent): }
 {$IfDef DEBUG}
-{sub}procedure LogManExp(const Rem: string);
-  var s: AnsiString; k: integer;
-  begin
-    LogFmt('%s: BinExp=%d, DecExp=%d, NbrManElem=%d',
-           [Rem,BinExp,DecExp,NbrManElem]);
-    s := '';
-    For k := 0 to NbrManElem - 1 do s := Format(' %2.2x',[Man[k]]) + s;
-    LogFmt('  %s',[s]);
-  end;
-{$EndIf}
+	LogManExp('Before trimming');
+{$ENDIF}
+	while (NbrManElem > 0) and (BinExp < 0) and not Odd(Man[0]) do
+	begin
+		Cry := 0;
+		for i := NbrManElem - 1 downto 0 do
+		begin
+			Tmp := (Cry shl BitsInBufElem) or Man[i];
+			Man[i] := (Tmp shr 1);
+			Cry := Tmp and 1;
+		end;
+		Inc(BinExp);
+{$IFDEF DEBUG}
+		LogManExp('Shifting down');
+{$ENDIF}
+		if Man[NbrManElem - 1] = 0 then
+			Dec(NbrManElem);
+	end{while};
 
-Begin
+	{ Check for zero: }
+	if NbrManElem = 0 then
+	begin
+		if Negative then
+			Result := '- 0'
+		else
+			Result := '+ 0';
+		Exit;
+	end;
 
-{ Load Mantissa and binary exponent: }
-  NbrManElem := (ValNbrBits + BitsInBufElem - 1) div BitsInBufElem;
-  SetLength(Man,NbrManElem);
-  Move(Value,Man[0],(ValNbrBits + 7) div 8); {Assuming little endian input}
-{ Set exponents: (Value = Mantissa * 2^BinExp * 10^DecExp) }
-  BinExp := ValBinExp;
-  DecExp := 0;
-
-{ Reduce mantissa to mininum number of bits
-      (i.e. while mantissa is odd, div by 2 and inc binary exponent): }
-    {$IfDef DEBUG}
-  LogManExp('Before trimming');
-    {$EndIf}
-  While (NbrManElem > 0) and (BinExp < 0) and not Odd(Man[0]) do begin
-    Cry := 0;
-    for i := NbrManElem - 1 downto 0 do begin
-      Tmp := (Cry shl BitsInBufElem) or Man[i];
-      Man[i] := (Tmp shr 1);
-      Cry := Tmp and 1;
+   {
+      Repeatably multiply by 10 until there is no more fraction. Decrement the DecExp at the same time.
+      Note that a multiply by 10 is same as mul. by 5 and inc of BinExp exponent.
+      Also note that a multiply by 5 adds two or three bits to number of mantissa bits.
+   }
+   NbrDecFraDigits := -BinExp; {Observe! 0.5, 0.25, 0.125, 0.0625, 0.03125, ...}
+   i := NbrManElem + (3*NbrDecFraDigits + BitsInBufElem - 1) div BitsInBufElem;
+   if length(Man) < i then
+      SetLength(Man,i);
+{$IFDEF DEBUG}
+   LogManExp('Prep mul out');
+{$ENDIF}
+   for i := 1 to NbrDecFraDigits do
+   begin
+      CryE := 0;
+      for j := 0 to NbrManElem - 1 do
+         MultiplyAndAdd(Man[j],5,CryE,CryE,Man[j]);
+//			MultiplyAndAdd(Multiplican, Multiplier, CryIn: tSglWord; var CryOut, Product: tSglWord);
+      if CryE <> 0 then
+      begin
+         Inc(NbrManElem);
+         Man[NbrManElem-1] := CryE;
       end;
-    inc(BinExp);
-    {$IfDef DEBUG}
-    LogManExp('Shifting down');
-    {$EndIf}
-    If Man[NbrManElem - 1] = 0
-      then dec(NbrManElem);
+      Inc(BinExp);
+      Dec(DecExp);
+{$IFDEF DEBUG}
+      LogManExp('Mul out');
+{$ENDIF}
+
+   end{i-loop};
+
+{$IFDEF DEBUG}
+   LogManExp('Finished multiplies');
+{$ENDIF}
+
+   { Finish reducing BinExp to 0 by shifting mantissa up: }
+   while (BinExp > 0) do
+   begin
+      Cry := 0;
+      for i := 0 to NbrManElem - 1 do
+      begin
+         Tmp1.W := Man[i] shl 1;
+         Man[i] := Tmp1.L + Cry;
+         Cry := Tmp1.H;
+      end;
+      Dec(BinExp);
+      if Cry <> 0 then
+      begin
+         Inc(NbrManElem);
+         if length(Man) < NbrManElem then
+            SetLength(Man,NbrManElem);
+         Man[NbrManElem - 1] := Cry;
+      end;
+{$IFDEF DEBUG}
+      LogManExp('Shifting up');
+{$ENDIF}
     end{while};
 
-{ Check for zero: }
-  If NbrManElem = 0 then begin
-    Result := '0';
-    Goto Finish;
-    end;
+   { Repeatably divide by 10 and use remainders to create decimal AnsiString: }
+   Result := ''; {DEBUG}
+{$IFDEF DEBUG}
+   LogManExp('Before division');
+{$ENDIF}
 
-{ Repeatably multiply by 10 until there is no more fraction. Decrement the
-      DecExp at the same time.  Note that a multiply by 10 is same as mul.
-      by 5 and inc of BinExp exponent.  Also note that a multiply by 5 adds
-      two or three bits to number of mantissa bits. }
-  NbrDecFraDigits := -BinExp; {Observe! 0.5, 0.25, 0.125, 0.0625, 0.03125, ...}
-  i := NbrManElem + (3*NbrDecFraDigits + BitsInBufElem - 1) div BitsInBufElem;
-  If length(Man) < i
-        then SetLength(Man,i);
-    {$IfDef DEBUG}
-  LogManExp('Prep mul out');
-    {$EndIf}
-  For i := 1 to NbrDecFraDigits do begin
-    CryE := 0;
-    For j := 0 to NbrManElem - 1
-        do MultiplyAndAdd(Man[j],5,CryE,CryE,Man[j]);
-//         MultiplyAndAdd(Multiplican, Multiplier, CryIn: tSglWord;
-//                        var CryOut, Product: tSglWord);
-    If CryE <> 0 then begin
-      Inc(NbrManElem);
-      Man[NbrManElem-1] := CryE;
-      end;
-    inc(BinExp);
-    dec(DecExp);
-    {$IfDef DEBUG}
-    LogManExp('Mul out');
-    {$EndIf}
-    end{i-loop};
-    {$IfDef DEBUG}
-  LogManExp('Finished multiplies');
-    {$EndIf}
+   repeat
+      { If not first then place separators: }
+      if Result <> '' then
+         if DecExp = 0 then
+            Result := DecimalPoint + Result
+         else if (ThousandsSep = ' ') and ((DecExp mod 5) = 0) then
+            Result := ' ' + Result
+         else if not (ThousandsSep in [#0,' ']) and ((DecExp mod 3) = 0) then
+            Result := ThousandsSep + Result;
+         { DivideAndRemainder mantissa array by 10: }
+         CryE := 0;
+         for i := NbrManElem - 1 downto 0 do
+            DivideAndRemainder(CryE,Man[i],10,Man[i],CryE);
+//				DivideAndRemainder(NumeratorHi, NumeratorLo: Byte;  Divisor: Byte; var Quotient, Remainder: Byte): boolean;
+         Inc(DecExp);
+         c := DecDigits[CryE];
+         Result := c + Result;
+         if (NbrManElem > 0) and (Man[NbrManElem - 1]=0) then
+				Dec(NbrManElem);
+   until (DecExp > 0) and (NbrManElem = 0);
 
-{ Finish reducing BinExp to 0 by shifting mantissa up: }
-  While (BinExp > 0) do begin
-    Cry := 0;
-    for i := 0 to NbrManElem - 1 do begin
-      Tmp1.W := Man[i] shl 1;
-      Man[i] := Tmp1.L + Cry;
-      Cry := Tmp1.H;
-      end;
-    dec(BinExp);
-    If Cry <> 0 then begin
-      inc(NbrManElem);
-      If length(Man) < NbrManElem
-        then SetLength(Man,NbrManElem);
-      Man[NbrManElem - 1] := Cry;
-      end;
-    {$IfDef DEBUG}
-    LogManExp('Shifting up');
-    {$EndIf}
-    end{while};
-
-{ Repeatably divide by 10 and use remainders to create decimal AnsiString: }
-  Result := ''; {DEBUG}
-    {$IfDef DEBUG}
-  LogManExp('Before division');
-    {$EndIf}
-  Repeat
-  { If not first then place separators: }
-    If Result <> '' then if DecExp = 0
-      then Result := DecimalPoint + Result
-      else if (ThousandsSep = ' ') and ((DecExp mod 5) = 0)
-        then Result := ' ' + Result
-        else if not (ThousandsSep in [#0,' ']) and ((DecExp mod 3) = 0)
-          then Result := ThousandsSep + Result;
-  { DivideAndRemainder mantissa array by 10: }
-    CryE := 0;
-    For i := NbrManElem - 1 downto 0
-        do DivideAndRemainder(CryE,Man[i],10,Man[i],CryE);
-//         DivideAndRemainder(NumeratorHi, NumeratorLo: Byte;  Divisor: Byte;
-//                            var Quotient, Remainder: Byte): boolean;
-    Inc(DecExp);
-    c := DecDigits[CryE];
-    Result := c + Result;
-    If (NbrManElem > 0) and (Man[NbrManElem - 1]=0)
-      then dec(NbrManElem);
-    Until (DecExp > 0) and (NbrManElem = 0);
-
-Finish:
-  If Negative
-    then Result := '- ' + Result
-    else Result := '+ ' + Result;
-End;
+	if Negative then
+		Result := '- ' + Result
+	else
+		Result := '+ ' + Result;
+end;
 
 Procedure AnalyzeFloat(const Value: extended; var NumberType: tTypeFloat;
                 var Negative: boolean; var Exponent: word; var Mantissa: int64);
@@ -287,34 +303,43 @@ begin
       else NumberType := tfNormal;
 end;
 
-Function ExactFloatToStrEx(const Value: extended;
-                DecimalPoint: char = '.'; ThousandsSep: char = ' '): AnsiString;
-var NumberType: tTypeFloat; Negative: boolean; Exponent: word; Mantissa: int64;
+Function ExactFloatToStrEx(const Value: Extended; DecimalPoint: char = '.'; ThousandsSep: char = ' '): AnsiString;
+var
+	NumberType: TTypeFloat;
+	Negative: Boolean;
+	Exponent: Word;
+	Mantissa: Int64;
 Begin
-  AnalyzeFloat(Value,NumberType,Negative,Exponent,Mantissa);
-  Case NumberType of
-    tfNormal      : Result := FloatingBinPointToDecStr
-        (Mantissa, {NbrBits}64, {BinExp}(Exponent - $3FFF) - 63,
-         Negative, DecimalPoint, ThousandsSep);
-    tfZero: If Negative
-               then Result := '- 0'
-               else Result := '+ 0';
-    tfDenormal    : Result := FloatingBinPointToDecStr
-        (Mantissa, {NbrBits}64, {BinExp}(- $3FFF - 62),
-         Negative, DecimalPoint, ThousandsSep);
-    tfIndefinite  : Result := 'Indefinite';
-    tfInfinity: If Negative
-               then Result := '- Infinity'
-               else Result := '+ Infinity';
-    tfQuietNan    : Result := Format('QNaN(%d)',[Mantissa]);
-    tfSignalingNan: Result := Format('SNaN(%d)',[Mantissa]);
-    else            Result := 'UnknownNumberType';
-    end{cases};
+	AnalyzeFloat(Value, NumberType,Negative,Exponent,Mantissa);
+
+	case NumberType of
+	tfNormal: Result := FloatingBinPointToDecStr(Mantissa, {NbrBits}64, {BinExp}(Exponent - $3FFF) - 63, Negative, DecimalPoint, ThousandsSep);
+	tfZero:
+		begin
+			if Negative then
+				Result := '- 0'
+			else
+				Result := '+ 0';
+		end;
+	tfDenormal: Result := FloatingBinPointToDecStr(Mantissa, {NbrBits}64, {BinExp}(- $3FFF - 62), Negative, DecimalPoint, ThousandsSep);
+	tfIndefinite: Result := 'Indefinite';
+	tfInfinity:
+		begin
+			if Negative then
+				Result := '- Infinity'
+			else
+				Result := '+ Infinity';
+      end;
+	tfQuietNan: Result := Format('QNaN(%d)', [Mantissa]);
+	tfSignalingNan: Result := Format('SNaN(%d)', [Mantissa]);
+	else
+		Result := 'UnknownNumberType';
+	end;
 End;
 
-Function ExactFloatToStr(const Value: extended): AnsiString;
+Function ExactFloatToStr(const Value: Extended): AnsiString;
 Begin
-  Result := ExactFloatToStrEx(Value,DecimalSeparator,ThousandSeparator);
+  Result := ExactFloatToStrEx(Value, DecimalSeparator, ThousandSeparator);
 End;
 
 Function ParseFloat(const Value: extended): AnsiString;
