@@ -93,12 +93,12 @@ begin
 	else
 		LogFmt('Calling: Exp=$%4.4x, Man=$%16.16x, G=%g', [ExtX.Exp,ExtX.Man,Value]);
 
-	try{Except}
+	try
 		cc := GetCpuClockCycleCount;
 		if CallExVer_ck.Checked then
 			s := ExactFloatToStrEx(Value)
 		else
-			s := ExactFloatToStr(Value);
+			s := ExactFloatToStrEx(Value);
 
 		cc := GetCpuClockCycleCount - cc;
 		LogFmt('  Required %s clock cycles',[ExactFloatToStr(cc)]);
@@ -119,7 +119,8 @@ begin
 	begin
 		if s[i] in ['-','0'..'9','.','e','E'] then
 		begin
-			inc(j); s[j] := s[i]
+			Inc(j);
+			s[j] := s[i]
 		end;
 	end;
 	SetLength(s,j);

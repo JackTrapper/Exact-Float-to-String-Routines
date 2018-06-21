@@ -1,4 +1,4 @@
-Unit ExactFloatToStr_JH0;
+unit ExactFloatToStr_JH0;
 
 (* *****************************************************************************
 
@@ -14,12 +14,10 @@ Unit ExactFloatToStr_JH0;
 
   This code uses dynamic arrays, overloaded calls, and optional parameters.
 
-  These routines are not very optimized for speed or space.  I plan to
-      replace the individual bit-shifts and multiplies-by-ten with mul-
-      tiple versions of same.  Consider making an object so that the
-      arrays don't have to reallocated so often. And consider making an
-      output buffer character array so that the Result will be allocated
-      only once.
+  These routines are not very optimized for speed or space.
+		I plan to replace the individual bit-shifts and multiplies-by-ten with multiple versions of same.
+		Consider making an object so that the arrays don't have to reallocated so often.
+		And consider making an output buffer character array so that the Result will be allocated only once.
 
   Rev. 2003.01.01 by JFH to add the three ParseFloat functions.
   Rev. 12/26/2002 by JFH to bracket the DEBUG code with conditionals.
@@ -30,73 +28,70 @@ Unit ExactFloatToStr_JH0;
 ***************************************************************************** *)
 
 { Turn DeBUG on to make available detail debugging at expense of speed.}
-{$Define notDEBUG}
+{DEFINE DEBUG}
 
-Interface
+interface
 
-Function ExactFloatToStr(const Value: Extended): AnsiString;
+uses
+	SysUtils;
+
+function ExactFloatToStr(const Value: Extended): string; overload; inline;
+function ExactFloatToStr(const Value: Extended; const AFormatSettings: TFormatSettings): string; overload; inline;
+
 { This call uses the global DecimalSeparator and ThousandSeparator.
   (It can be slow for very large or very small extended numbers.) }
 
-Function ExactFloatToStrEx(const Value: extended;
-                DecimalPoint: Char = '.'; ThousandsSep: Char = ' '): AnsiString;
+function ExactFloatToStrEx(const Value: Extended; DecimalPoint: Char='.'; ThousandsSep: Char=' '): string;
 { Use #0 for the ThousandsSep if *no* grouping breaks are desired. }
 
-Function ParseFloat(const Value: extended): AnsiString; overload;
-Function ParseFloat(const Value: double): AnsiString;   overload;
-Function ParseFloat(const Value: single): AnsiString;   overload;
+function ParseFloat(const Value: Extended): string; overload;
+function ParseFloat(const Value: Double): string;   overload;
+function ParseFloat(const Value: Single): string;   overload;
 { These calls parse a float value to its sign, exponent, and mantissa. }
 
-Function FloatingBinPointToDecStr
-    (const Value; const ValNbrBits, ValBinExp: integer; Negative: boolean;
-     DecimalPoint: char = '.'; ThousandsSep: char = ' '): AnsiString;
+function FloatingBinPointToDecStr(const Value; const ValNbrBits, ValBinExp: integer; Negative: boolean; DecimalPoint: Char='.'; ThousandsSep: Char=' '): string;
 { This is the basic conversion engine. }
 
-Type tTypeFloat = (tfUnknown,tfNormal,tfZero,tfDenormal,tfIndefinite,
-                   tfInfinity,tfQuietNan,tfSignalingNan);
+type tTypeFloat = (tfUnknown, tfNormal, tfZero, tfDenormal, tfIndefinite, tfInfinity, tfQuietNan, tfSignalingNan);
 
-Procedure AnalyzeFloat(const Value: extended; var NumberType: tTypeFloat;
-                var Negative: boolean; var Exponent: word; var Mantissa: int64);
+procedure AnalyzeFloat(const Value: Extended; var NumberType: TTypeFloat; var Negative: Boolean; var Exponent: Word; var Mantissa: Int64);
 
-Var LogFmtX:
-        procedure (const Fmt: AnsiString; const Data: array of const) of object;
+var
+	LogFmtX: procedure (const Fmt: AnsiString; const Data: array of const) of object;
 
 {$IfDef DEBUG}
-Const Debug = true;
+const Debug = True;
 {$Else}
-Const Debug = false;
+const Debug = False;
 {$EndIf}
 
-Implementation
+implementation
 
-Uses SysUtils;
+type
+	TSglWord = Word; {Consider Byte or Word}
+	TDblWord = LongWord; {Consider Word or LongWord}
 
-Type tSglWord = Word; {Consider Byte or Word}
-     tDblWord = LongWord; {Consider Word or LongWord}
-
-Const SizeOfAryElem = SizeOf(tSglWord);
-      BitsInBufElem = SizeOfAryElem*8;
-      DecDigits: array [0..9] of char = '0123456789';
+const
+	SizeOfAryElem = SizeOf(tSglWord);
+	BitsInBufElem = SizeOfAryElem*8;
+	DecDigits: array [0..9] of char = '0123456789';
 
 {$IfDef DEBUG}
-
-Procedure LogFmt(const Fmt: AnsiString; const Data: array of const);
+procedure LogFmt(const Fmt: AnsiString; const Data: array of const);
 begin
-  If Assigned(LogFmtX)
-    then LogFmtX(Fmt,Data);
+	If Assigned(LogFmtX) then
+		LogFmtX(Fmt,Data);
 end;
-
 {$EndIf}
 
-Procedure MultiplyAndAdd
-    (Multiplican, Multiplier, CryIn: tSglWord;
-     var CryOut, Product: tSglWord);
-var Tmp: packed record case byte of 0: (W: tDblWord); 1:(L,H: tSglWord); end;
-Begin
-  Tmp.W  := Multiplican * Multiplier + CryIn;
-  CryOut  := Tmp.H;
-  Product := Tmp.L;
-End;
+procedure MultiplyAndAdd(Multiplican, Multiplier, CryIn: tSglWord; var CryOut, Product: tSglWord);
+var
+	Tmp: packed record case byte of 0: (W: tDblWord); 1:(L,H: tSglWord); end;
+begin
+	Tmp.W  := Multiplican * Multiplier + CryIn;
+	CryOut  := Tmp.H;
+	Product := Tmp.L;
+end;
 
 Function DivideAndRemainder
     (NumeratorHi, NumeratorLo: tSglWord; Divisor: tSglWord;
@@ -118,7 +113,7 @@ Begin
 End;
 
 Function FloatingBinPointToDecStr(const Value; const ValNbrBits, ValBinExp: Integer; Negative: Boolean;
-		DecimalPoint: Char='.'; ThousandsSep: Char=' '): AnsiString;
+		DecimalPoint: Char='.'; ThousandsSep: Char=' '): string;
 { Value = Mantissa * 2^BinExp * 10^DecExp }
 var
 	Man: array of tSglWord;
@@ -131,12 +126,12 @@ var
 	i, j, Tmp: integer;
 	c: Char;
 	Tmp1: packed record case byte of 0: (W: tDblWord); 1:(L,H: tSglWord); end;
-Label Finish;
 
 {$IFDEF DEBUG}
 	procedure LogManExp(const Rem: string);
 	var
-		s: AnsiString; k: integer;
+		s: string;
+		k: integer;
 	begin
 		LogFmt('%s: BinExp=%d, DecExp=%d, NbrManElem=%d', [Rem,BinExp,DecExp,NbrManElem]);
 		s := '';
@@ -181,9 +176,9 @@ begin
 	if NbrManElem = 0 then
 	begin
 		if Negative then
-			Result := '- 0'
+			Result := '-0'
 		else
-			Result := '+ 0';
+			Result := '+0';
 		Exit;
 	end;
 
@@ -254,28 +249,37 @@ begin
    repeat
       { If not first then place separators: }
       if Result <> '' then
+		begin
          if DecExp = 0 then
             Result := DecimalPoint + Result
-         else if (ThousandsSep = ' ') and ((DecExp mod 5) = 0) then
-            Result := ' ' + Result
-         else if not (ThousandsSep in [#0,' ']) and ((DecExp mod 3) = 0) then
-            Result := ThousandsSep + Result;
-         { DivideAndRemainder mantissa array by 10: }
-         CryE := 0;
-         for i := NbrManElem - 1 downto 0 do
-            DivideAndRemainder(CryE,Man[i],10,Man[i],CryE);
-//				DivideAndRemainder(NumeratorHi, NumeratorLo: Byte;  Divisor: Byte; var Quotient, Remainder: Byte): boolean;
-         Inc(DecExp);
-         c := DecDigits[CryE];
-         Result := c + Result;
-         if (NbrManElem > 0) and (Man[NbrManElem - 1]=0) then
-				Dec(NbrManElem);
+			else if (ThousandsSep = ' ') and ((DecExp mod 5) = 0) then
+			begin
+				//Space separator means group digits every 5
+				Result := ThousandsSep + Result
+			end
+			else if ((ThousandsSep <> '') and (ThousandsSep <> ' ') and (ThousandsSep <> #0)) and ((DecExp mod 3) = 0) then
+			begin
+				//Group digits every 3 if they asked for a separator (aside from the space separator; that means 5)
+				Result := ThousandsSep + Result;
+			end;
+      end;
+
+		{ DivideAndRemainder mantissa array by 10: }
+		CryE := 0;
+		for i := NbrManElem - 1 downto 0 do
+			DivideAndRemainder(CryE, Man[i], 10, Man[i], CryE); //DivideAndRemainder(NumeratorHi, NumeratorLo: Byte;  Divisor: Byte; var Quotient, Remainder: Byte): boolean;
+
+		Inc(DecExp);
+		c := DecDigits[CryE];
+		Result := c + Result;
+		if (NbrManElem > 0) and (Man[NbrManElem - 1]=0) then
+			Dec(NbrManElem);
    until (DecExp > 0) and (NbrManElem = 0);
 
 	if Negative then
-		Result := '- ' + Result
+		Result := '-' + Result
 	else
-		Result := '+ ' + Result;
+		Result := '+' + Result;
 end;
 
 Procedure AnalyzeFloat(const Value: extended; var NumberType: tTypeFloat;
@@ -303,13 +307,18 @@ begin
       else NumberType := tfNormal;
 end;
 
-Function ExactFloatToStrEx(const Value: Extended; DecimalPoint: char = '.'; ThousandsSep: char = ' '): AnsiString;
+function ExactFloatToStrEx(const Value: Extended; DecimalPoint: Char='.'; ThousandsSep: Char=' '): string;
 var
 	NumberType: TTypeFloat;
 	Negative: Boolean;
 	Exponent: Word;
 	Mantissa: Int64;
-Begin
+begin
+{
+	ThousandsSep:
+			' ': group digits in groups of 5
+			'', #0: no digit grouping
+}
 	AnalyzeFloat(Value, NumberType,Negative,Exponent,Mantissa);
 
 	case NumberType of
@@ -335,14 +344,19 @@ Begin
 	else
 		Result := 'UnknownNumberType';
 	end;
-End;
+end;
 
-Function ExactFloatToStr(const Value: Extended): AnsiString;
-Begin
-  Result := ExactFloatToStrEx(Value, DecimalSeparator, ThousandSeparator);
-End;
+function ExactFloatToStr(const Value: Extended): string;
+begin
+	Result := ExactFloatToStr(Value, FormatSettings);
+end;
 
-Function ParseFloat(const Value: extended): AnsiString;
+function ExactFloatToStr(const Value: Extended; const AFormatSettings: TFormatSettings): string; overload;
+begin
+	Result := ExactFloatToStrEx(Value, AFormatSettings.DecimalSeparator, AFormatSettings.ThousandSeparator);
+end;
+
+Function ParseFloat(const Value: extended): string;
 { This call parses an extended value to its sign, exponent, and mantissa. }
 var ValueRec: packed record Man: Int64; Exp: word end absolute Value;
 const PN: array [boolean] of char = '+-';
@@ -353,7 +367,7 @@ Begin
                         ValueRec.Man]);
 End;
 
-Function ParseFloat(const Value: double): AnsiString;
+Function ParseFloat(const Value: double): string;
 { This call parses a double value to its sign, exponent, and mantissa. }
 var ValueRec: Int64 absolute Value;
 const PN: array [boolean] of char = '+-';
@@ -364,16 +378,18 @@ Begin
                        (ValueRec and $000FFFFFFFFFFFFF)]);
 End;
 
-Function ParseFloat(const Value: single): AnsiString;
-{ This call parses a single value to its sign, exponent, and mantissa. }
-var ValueRec: LongInt absolute Value;
-const PN: array [boolean] of char = '+-';
-Begin
-  Result := Format('Sgl(Sgn="%s",Exp=$%2.2x,Man=$%6.6x)',
+function ParseFloat(const Value: Single): string;
+var
+	ValueRec: LongInt absolute Value;
+const
+	PN: array [boolean] of char = '+-';
+begin
+	{ This call parses a single value to its sign, exponent, and mantissa. }
+	Result := Format('Sgl(Sgn="%s",Exp=$%2.2x,Man=$%6.6x)',
                    [PN[(ValueRec and $80000000) <> 0],
                       ((ValueRec and $7F800000) shr 23),
                        (ValueRec and $007FFFFF)]);
-End;
+end;
 
-End.
+end.
 
