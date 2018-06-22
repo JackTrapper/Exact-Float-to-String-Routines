@@ -35,13 +35,20 @@ interface
 uses
 	SysUtils;
 
+const
+	ThinSpace:          WideChar = #$2009; //U+2009 THIN SPACE
+	NarrowNoBreakSpace: WideChar = #$202F; //U+202F NARROW NO-BREAK SPACE
+	FigureSpace:        WideChar = #$2007; //U+2007 FIGURE SPACE
+
+
+
 function ExactFloatToStr(const Value: Extended): string; overload; inline;
 function ExactFloatToStr(const Value: Extended; const AFormatSettings: TFormatSettings): string; overload; inline;
 
 { This call uses the global DecimalSeparator and ThousandSeparator.
   (It can be slow for very large or very small extended numbers.) }
 
-function ExactFloatToStrEx(const Value: Extended; DecimalPoint: Char='.'; ThousandsSep: Char=' '): string;
+function ExactFloatToStrEx(const Value: Extended; DecimalPoint: string='.'; ThousandsSep: string=''): string;
 { Use #0 for the ThousandsSep if *no* grouping breaks are desired. }
 
 function ParseFloat(const Value: Extended): string; overload;
@@ -49,12 +56,13 @@ function ParseFloat(const Value: Double): string;   overload;
 function ParseFloat(const Value: Single): string;   overload;
 { These calls parse a float value to its sign, exponent, and mantissa. }
 
-function FloatingBinPointToDecStr(const Value; const ValNbrBits, ValBinExp: integer; Negative: boolean; DecimalPoint: Char='.'; ThousandsSep: Char=' '): string;
+function FloatingBinPointToDecStr(const Value; const ValNbrBits, ValBinExp: integer; Negative: Boolean;
+		DecimalPoint: string='.'; ThousandsSep: string=''): string;
 { This is the basic conversion engine. }
 
 type tTypeFloat = (tfUnknown, tfNormal, tfZero, tfDenormal, tfIndefinite, tfInfinity, tfQuietNan, tfSignalingNan);
 
-procedure AnalyzeFloat(const Value: Extended; var NumberType: TTypeFloat; var Negative: Boolean; var Exponent: Word; var Mantissa: Int64);
+procedure AnalyzeFloat(const Value: Extended; out NumberType: TTypeFloat; out Negative: Boolean; out Exponent: Word; out Mantissa: Int64);
 
 var
 	LogFmtX: procedure (const Fmt: AnsiString; const Data: array of const) of object;
@@ -72,9 +80,18 @@ type
 	TDblWord = LongWord; {Consider Word or LongWord}
 
 const
-	SizeOfAryElem = SizeOf(tSglWord);
-	BitsInBufElem = SizeOfAryElem*8;
-	DecDigits: array [0..9] of char = '0123456789';
+//	SizeOfAryElem = SizeOf(TSglWord);
+	BitsInBufElem = SizeOf(TSglWord)*8; //SizeOfAryElem*8;
+
+const
+	SPositiveSign = '+';        //LOCALE_SPOSITIVESIGN, at most 4 characters
+	SNegativeSign = '-';        //LOCALE_SNEGATIVESIGN, at most 4 characters
+	SPosInfinity = 'Infinity';  //LOCALE_SPOSINFINITY
+	SNegInfinity = '-Infinity'; //LOCALE_SNEGINFINITY
+	SNativeDigits: array[0..9] of Char = '0123456789'; //LOCALE_SNATIVEDIGITS
+	INegNumber =   1; //0 = "(1.1), 1 = "-1.1", 2 = "- 1.1", 3 = "1.1-", 4 = "1.1 -" LOCALE_INEGNUMBER
+
+
 
 {$IfDef DEBUG}
 procedure LogFmt(const Fmt: AnsiString; const Data: array of const);
@@ -112,8 +129,37 @@ Begin
     end;
 End;
 
-Function FloatingBinPointToDecStr(const Value; const ValNbrBits, ValBinExp: Integer; Negative: Boolean;
-		DecimalPoint: Char='.'; ThousandsSep: Char=' '): string;
+function AddSign(const s: string; IsNegative: Boolean): string;
+begin
+	 //0 = "(1.1), 1 = "-1.1", 2 = "- 1.1", 3 = "1.1-", 4 = "1.1 -" LOCALE_INEGNUMBER
+	if IsNegative then
+	begin
+		case INegNumber of
+		0: Result := '('+s+')';           // "(1.1)"
+		1: Result := SNegativeSign+s;     // "-1.1"
+		2: Result := SNegativeSign+' '+s; // "- 1.1"
+		3: Result := s+SNegativeSign;     // "1.1-"
+		4: Result := s+' '+SNegativeSign; // "1.1 -"
+		else
+			Result := SNegativeSign+s;
+		end
+	end
+	else
+	begin
+		case INegNumber of
+		0: Result := s;                   // "(1.1)"
+		1: Result := SPositiveSign+s;     // "-1.1"
+		2: Result := SPositiveSign+' '+s; // "- 1.1"
+		3: Result := s+SPositiveSign;     // "1.1-"
+		4: Result := s+' '+SPositiveSign; // "1.1 -"
+		else
+			Result := SPositiveSign+s;
+		end
+	end;
+end;
+
+function FloatingBinPointToDecStr(const Value; const ValNbrBits, ValBinExp: Integer; Negative: Boolean;
+		DecimalPoint: string='.'; ThousandsSep: string=''): string;
 { Value = Mantissa * 2^BinExp * 10^DecExp }
 var
 	Man: array of tSglWord;
@@ -126,6 +172,7 @@ var
 	i, j, Tmp: integer;
 	c: Char;
 	Tmp1: packed record case byte of 0: (W: tDblWord); 1:(L,H: tSglWord); end;
+	DigitGroups: Integer; //3 for most cultures, 5 is also nice to look at
 
 {$IFDEF DEBUG}
 	procedure LogManExp(const Rem: string);
@@ -142,6 +189,13 @@ var
 {$ENDIF}
 
 begin
+	if ThousandsSep = ' ' then
+		DigitGroups := 5  //Space separator means group digits every 5
+	else if ThousandsSep <> '' then
+		DigitGroups := 3  //any other separator means group digits every 3
+	else
+		DigitGroups := 0;
+
 	{ Load Mantissa and binary exponent: }
 	NbrManElem := (ValNbrBits + BitsInBufElem - 1) div BitsInBufElem;
 	SetLength(Man,NbrManElem);
@@ -175,10 +229,7 @@ begin
 	{ Check for zero: }
 	if NbrManElem = 0 then
 	begin
-		if Negative then
-			Result := '-0'
-		else
-			Result := '+0';
+		Result := AddSign(Result, Negative);
 		Exit;
 	end;
 
@@ -198,8 +249,7 @@ begin
    begin
       CryE := 0;
       for j := 0 to NbrManElem - 1 do
-         MultiplyAndAdd(Man[j],5,CryE,CryE,Man[j]);
-//			MultiplyAndAdd(Multiplican, Multiplier, CryIn: tSglWord; var CryOut, Product: tSglWord);
+         MultiplyAndAdd(Man[j],5,CryE,CryE,Man[j]); //MultiplyAndAdd(Multiplican, Multiplier, CryIn: tSglWord; var CryOut, Product: tSglWord);
       if CryE <> 0 then
       begin
          Inc(NbrManElem);
@@ -252,16 +302,10 @@ begin
 		begin
          if DecExp = 0 then
             Result := DecimalPoint + Result
-			else if (ThousandsSep = ' ') and ((DecExp mod 5) = 0) then
-			begin
-				//Space separator means group digits every 5
+			else if (DigitGroups=5) and ((DecExp mod 5) = 0) then
 				Result := ThousandsSep + Result
-			end
-			else if ((ThousandsSep <> '') and (ThousandsSep <> ' ') and (ThousandsSep <> #0)) and ((DecExp mod 3) = 0) then
-			begin
-				//Group digits every 3 if they asked for a separator (aside from the space separator; that means 5)
-				Result := ThousandsSep + Result;
-			end;
+			else if (DigitGroups=3) and ((DecExp mod 3) = 0) then
+				Result := ThousandsSep + Result
       end;
 
 		{ DivideAndRemainder mantissa array by 10: }
@@ -270,74 +314,77 @@ begin
 			DivideAndRemainder(CryE, Man[i], 10, Man[i], CryE); //DivideAndRemainder(NumeratorHi, NumeratorLo: Byte;  Divisor: Byte; var Quotient, Remainder: Byte): boolean;
 
 		Inc(DecExp);
-		c := DecDigits[CryE];
+		c := SNativeDigits[CryE];
 		Result := c + Result;
 		if (NbrManElem > 0) and (Man[NbrManElem - 1]=0) then
 			Dec(NbrManElem);
    until (DecExp > 0) and (NbrManElem = 0);
 
-	if Negative then
-		Result := '-' + Result
-	else
-		Result := '+' + Result;
+	Result := AddSign(Result, Negative);
 end;
 
-Procedure AnalyzeFloat(const Value: extended; var NumberType: tTypeFloat;
-                var Negative: boolean; var Exponent: word; var Mantissa: int64);
-var ValueRec: packed record Man: Int64; Exp: word end absolute Value;
+procedure AnalyzeFloat(const Value: Extended;
+		out NumberType: TTypeFloat; out Negative: Boolean; out Exponent: Word; out Mantissa: Int64);
+var
+	ValueRec: packed record Man: Int64; Exp: word end absolute Value;
 begin
-  Mantissa :=  ValueRec.Man;
-  Negative := (ValueRec.Exp and $8000)<>0;
-  Exponent := (ValueRec.Exp and $7FFF);
-  If (Exponent = $7FFF)
-    then if (Mantissa = 0)
-      then NumberType := tfInfinity
-      else begin
-        Mantissa := (Mantissa and $3FFFFFFFFFFFFFFF);
-        if ((ValueRec.Man and $4000000000000000) = 0)
-          then NumberType := tfSignalingNAN
-          else if (Mantissa = 0)
-            then NumberType := tfIndefinite
-            else NumberType := tfQuietNAN
-        end
-    else if (Exponent = 0)
-      then if (Mantissa = 0)
-        then NumberType := tfZero
-        else NumberType := tfDenormal
-      else NumberType := tfNormal;
+	Mantissa :=  ValueRec.Man;
+	Negative := (ValueRec.Exp and $8000)<>0;
+	Exponent := (ValueRec.Exp and $7FFF);
+	if (Exponent = $7FFF) then
+		if (Mantissa = 0) then
+			NumberType := tfInfinity
+		else
+		begin
+			Mantissa := (Mantissa and $3FFFFFFFFFFFFFFF);
+			if ((ValueRec.Man and $4000000000000000) = 0) then
+				NumberType := tfSignalingNAN
+			else if (Mantissa = 0) then
+				NumberType := tfIndefinite
+			else NumberType := tfQuietNAN
+		end
+		else if (Exponent = 0) then
+			if (Mantissa = 0)	then
+				NumberType := tfZero
+			else
+				NumberType := tfDenormal
+		else
+			NumberType := tfNormal;
 end;
 
-function ExactFloatToStrEx(const Value: Extended; DecimalPoint: Char='.'; ThousandsSep: Char=' '): string;
+function ExactFloatToStrEx(const Value: Extended; DecimalPoint: string; ThousandsSep: string): string;
 var
 	NumberType: TTypeFloat;
 	Negative: Boolean;
 	Exponent: Word;
 	Mantissa: Int64;
+const
+	BIAS = $3FFF;
 begin
 {
 	ThousandsSep:
 			' ': group digits in groups of 5
 			'', #0: no digit grouping
 }
-	AnalyzeFloat(Value, NumberType,Negative,Exponent,Mantissa);
+	AnalyzeFloat(Value, {out}NumberType, {out}Negative, {out}Exponent, {out}Mantissa);
 
 	case NumberType of
-	tfNormal: Result := FloatingBinPointToDecStr(Mantissa, {NbrBits}64, {BinExp}(Exponent - $3FFF) - 63, Negative, DecimalPoint, ThousandsSep);
+	tfNormal:   Result := FloatingBinPointToDecStr(Mantissa, {NbrBits}64, {BinExp}(Exponent-BIAS)-63, Negative, DecimalPoint, ThousandsSep);
+	tfDenormal: Result := FloatingBinPointToDecStr(Mantissa, {NbrBits}64, {BinExp}(-BIAS-62),         Negative, DecimalPoint, ThousandsSep);
 	tfZero:
 		begin
 			if Negative then
-				Result := '- 0'
+				Result := SNegativeSign+'0'
 			else
-				Result := '+ 0';
+				Result := SPositiveSign+'0';
 		end;
-	tfDenormal: Result := FloatingBinPointToDecStr(Mantissa, {NbrBits}64, {BinExp}(- $3FFF - 62), Negative, DecimalPoint, ThousandsSep);
 	tfIndefinite: Result := 'Indefinite';
 	tfInfinity:
 		begin
 			if Negative then
-				Result := '- Infinity'
+				Result := SPosInfinity
 			else
-				Result := '+ Infinity';
+				Result := SNegInfinity;
       end;
 	tfQuietNan: Result := Format('QNaN(%d)', [Mantissa]);
 	tfSignalingNan: Result := Format('SNaN(%d)', [Mantissa]);
