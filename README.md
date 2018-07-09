@@ -17,20 +17,18 @@ This code uses dynamic arrays, overloaded calls, and optional parameters
 Sample Usage
 ------------
 
-    ExactFloatToStr(0.28);
+    ExactFloatToStr(0.28); //convert using current locale
 
-Returns:
+Returns *(for en-US)*:
 
     +0.280,000,000,000,000,000,001,084,202,172,485,504,434,007,452,800,869,941,711,425,781,25
     
-You can customize the digit separator, you can specify no separator:
+You can customize the digit separator, and the grouping:
 
-    ExactFloatToStr(0.28, FormatSettings.DecimalSeparator, '');
+    ExactFloatToStrEx(0.28, FormatSettings.DecimalSeparator, 0);
     +0.28000000000000000000108420217248550443400745280086994171142578125
     
-If you specify a space (` `) as your sparator, it will use digit grouping of five:
-
-    ExactFloatToStr(0.28, FormatSettings.DecimalSeparator, ' ');
+    ExactFloatToStrEx(0.28, ' ', 5);
     +0.28000 00000 00000 00000 10842 02172 48550 44340 07452 80086 99417 11425 78125
 
 
